@@ -3,6 +3,9 @@ import random
 import datetime
 import time 
 from telebot import types
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+from telebot.types import InlineQueryResultArticle, InputTextMessageContent
+# --- Конец v20 ---
 
 # --- НОВОЕ ДЛЯ RENDER (v17) ---
 import os
@@ -40,23 +43,22 @@ except Exception as e:
 user_daily_stats = {} # Для "Градусника" и "Рулетки"
 polls_data = {}       # Для ОПРОСОВ
 
-# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
-# --- Новое хранилище для "умной" статистики ---
-# { chat_id: message_id }
-last_stats_message = {}
-# --- Конец v19 ---
-
-# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v18) ---
-# --- Новые хранилища для "личных" меню ---
-# { message_id: user_id }
+# (v18) "Личные" меню
 menu_owners = {}
-# { user_id: message_id }
 user_menus = {}
-# --- Конец v18 ---
+
+# (v19) Антифлуд статистики
+last_stats_message = {}
+
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+# { user_id: chat_id }
+# Хранит, в каком чате юзер играл в последний раз
+user_last_active_chat = {}
+# --- Конец v20 ---
 
 
 # --- Тексты для удобства ---
-MAIN_MENU_TEXT = "Докажи, что не терпила!"
+MAIN_MENU_TEXT = "Лох или красавчик? Волынка как у Барбоса?:"
 
 # --- ИДЕЯ №2: Функции "Градусника" ---
 
@@ -125,11 +127,10 @@ def create_main_menu_markup():
     markup.add(btn1, btn2, btn5, btn3, btn4)
     return markup
 
-# --- Обработчик /start (ИЗМЕНЕН v19) ---
+# --- Обработчик /start (v19) ---
 @bot.message_handler(commands=['start', 'play'])
 def send_choice_menu(message):
     
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
     chat_id = message.chat.id
     user_id = message.from_user.id
     
@@ -139,7 +140,6 @@ def send_choice_menu(message):
         print(f"Удалена команда {message.message_id} от {user_id}")
     except telebot.apihelper.ApiTelegramException as e:
         print(f"Не смог удалить команду /start (нет прав?): {e}")
-    # --- Конец v19 ---
 
     # 2. Антифлуд: Проверяем, есть ли у юзера старое меню
     if user_id in user_menus:
@@ -171,14 +171,13 @@ def send_choice_menu(message):
     print(f"Создано новое меню {new_menu_id} для {user_id}")
 
 
-# --- Обработчик команды /groupstats (ИЗМЕНЕН v19) ---
+# --- Обработчик команды /groupstats (v19) ---
 @bot.message_handler(commands=['groupstats'])
 def send_group_stats(message):
     chat_id = message.chat.id
     today_str = str(datetime.date.today())
 
     try:
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
         # 1. Антифлуд: Удаляем команду /groupstats
         try:
             bot.delete_message(chat_id, message.message_id)
@@ -193,7 +192,6 @@ def send_group_stats(message):
                 print(f"Удален старый отчет {last_stats_message[chat_id]}")
             except telebot.apihelper.ApiTelegramException as e:
                 print(f"Не смог удалить старый отчет (уже удален?): {e}")
-        # --- Конец v19 ---
 
         # 3. Проверяем, это личная переписка или группа
         if message.chat.type == "private":
@@ -260,11 +258,9 @@ def send_group_stats(message):
             biggest_name_safe = biggest_data['name'].replace('<', '&lt;').replace('>', '&gt;')
             report_lines.append(f"🍆 <b>Главный Гигант:</b> {biggest_name_safe} ({biggest_data['size']} см)")
             
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
         # 10. Отправляем НОВЫЙ отчет и СОХРАНЯЕМ его ID
         stats_msg = bot.send_message(chat_id, "\n".join(report_lines), parse_mode="HTML")
         last_stats_message[chat_id] = stats_msg.message_id
-        # --- Конец v19 ---
 
     except Exception as e:
         # Добавляем отлов ошибок, чтобы бот не падал
@@ -317,9 +313,7 @@ def create_poll_handler(message):
     chat_id = message.chat.id
     creator_id = message.from_user.id
     
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
     # Мы НЕ удаляем команду /go, так как в ней содержится вопрос!
-    # --- Конец v19 ---
     
     # Получаем текст вопроса (всё, что после /go )
     question = message.text[len('/go '):].strip()
@@ -355,15 +349,107 @@ def create_poll_handler(message):
 # --- Конец v17 ---
 
 
-# --- ОСНОВНОЙ ОБРАБОТчик КНОПОК (ИЗМЕНЕН v18) ---
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+# --- НОВЫЙ ОБРАБОТЧИК INLINE РЕЖИМА ---
+@bot.inline_query_handler(func=lambda query: True)
+def handle_inline_query(query):
+    user_id = query.from_user.id
+    user_name = query.from_user.first_name.replace('<', '&lt;').replace('>', '&gt;')
+    today_str = str(datetime.date.today())
+    results = []
+
+    try:
+        # 1. Найти последнюю активную сессию пользователя
+        chat_id = user_last_active_chat.get(user_id)
+        
+        # 2. Проверить, есть ли у него сегодняшняя статистика в этом чате
+        stats = None
+        if chat_id:
+            if (chat_id in user_daily_stats and 
+                user_daily_stats[chat_id]['date'] == today_str and
+                user_id in user_daily_stats[chat_id]['users']):
+                stats = user_daily_stats[chat_id]['users'][user_id]
+        
+        # 3. Если статистика НАЙДЕНА, генерируем 4 результата
+        if stats:
+            # A. Красавчик
+            kras_percent = stats.get('krasavchik', 0)
+            kras_title = f"Поделиться % Красавчика ({kras_percent}%)"
+            kras_msg = f"⚡ {user_name} сегодня красавчик на {kras_percent}%!"
+            results.append(
+                InlineQueryResultArticle(
+                    id='1', 
+                    title=kras_title, 
+                    description=get_krasavchik_comment(kras_percent),
+                    input_message_content=InputTextMessageContent(kras_msg)
+                )
+            )
+            
+            # B. Лох
+            loh_percent = stats.get('loh', 0)
+            loh_title = f"Поделиться % Лоха ({loh_percent}%)"
+            loh_msg = f"⚡ {user_name} сегодня лох на {loh_percent}%."
+            results.append(
+                InlineQueryResultArticle(
+                    id='2', 
+                    title=loh_title, 
+                    description=get_loh_comment(loh_percent),
+                    input_message_content=InputTextMessageContent(loh_msg)
+                )
+            )
+            
+            # C. Размер
+            size = stats.get('size', 0)
+            size_title = f"Поделиться Размером (🍆 {size} см)"
+            size_msg = f"⚡ {user_name} измерил свой размер: 🍆 {size} см!"
+            results.append(
+                InlineQueryResultArticle(
+                    id='3', 
+                    title=size_title, 
+                    description=get_size_comment(size),
+                    input_message_content=InputTextMessageContent(size_msg)
+                )
+            )
+            
+            # D. Рулетка
+            streak = stats.get('roulette_best_streak', 0)
+            roulette_title = f"Поделиться рекордом в Рулетке (🏆 {streak})"
+            roulette_msg = f"⚡ {user_name} поставил(а) рекорд в рулетке: 🏆 {streak} выстрелов подряд!"
+            results.append(
+                InlineQueryResultArticle(
+                    id='4', 
+                    title=roulette_title, 
+                    description=f"Лучшая серия выживания: {streak}",
+                    input_message_content=InputTextMessageContent(roulette_msg)
+                )
+            )
+            
+        # 4. Если статистика НЕ НАЙДЕНА (не играл, или бот перезагрузился)
+        else:
+            results.append(
+                InlineQueryResultArticle(
+                    id='1', 
+                    title="Нет данных для шеринга", 
+                    description="Напишите /start в группе, чтобы сначала сыграть!",
+                    input_message_content=InputTextMessageContent(f"{user_name}, я не могу найти твою статистику. Сыграй в группе!")
+                )
+            )
+            
+        # Отвечаем на запрос
+        # cache_time=10 - кэшируем результат всего на 10 секунд
+        bot.answer_inline_query(query.id, results, cache_time=10)
+
+    except Exception as e:
+        print(f"!!! ОШИБКА в handle_inline_query: {e}")
+# --- Конец v20 ---
+
+
+# --- ОСНОВНОЙ ОБРАБОТчик КНОПОК (ИЗМЕНЕН v20) ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
     """
     Обрабатывает ВСЕ нажатия на инлайн-кнопки.
     """
-    
-    # 1. Отвечаем на callback, чтобы у пользователя пропали "часики"
-    # (кроме случаев с опросом, там спец-ответ)
     
     today_str = str(datetime.date.today())
     user_id = call.from_user.id
@@ -514,6 +600,9 @@ def handle_callback_query(call):
         animation_prefix = ""
         is_standard_roulette_animation = False 
         is_size_animation = False # Новый флаг для анимации "Размера"
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+        is_game_played = False # Флаг, что игра была сыграна
+        # --- Конец v20 ---
 
         
         if call.data == "ask_krasavchik":
@@ -521,18 +610,21 @@ def handle_callback_query(call):
             final_text = get_krasavchik_comment(percent)
             animation_prefix = "😎 Красавчик"
             is_standard_roulette_animation = True 
+            is_game_played = True # (v20)
             
         elif call.data == "ask_loh":
             percent = current_stats['loh']
             final_text = get_loh_comment(percent)
             animation_prefix = "😅 Лох"
             is_standard_roulette_animation = True 
+            is_game_played = True # (v20)
         
         elif call.data == "ask_size":
             size = current_stats['size']
             final_text = get_size_comment(size)
             animation_prefix = "🍆 Мой размер"
             is_size_animation = True # Включаем новую анимацию
+            is_game_played = True # (v20)
         
         elif call.data == "roulette_play_next":
             
@@ -564,6 +656,10 @@ def handle_callback_query(call):
                 
                 # Показываем результат и кнопку "Назад"
                 bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, reply_markup=back_markup)
+                
+                # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+                user_last_active_chat[user_id] = chat_id # Запоминаем чат
+                # --- Конец v20 ---
                 return # Выходим из функции
 
             else: # ВЫЖИЛ
@@ -589,6 +685,10 @@ def handle_callback_query(call):
                 
                 # Показываем результат и 2 кнопки
                 bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, reply_markup=continue_markup)
+                
+                # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+                user_last_active_chat[user_id] = chat_id # Запоминаем чат
+                # --- Конец v20 ---
                 return # Выходим из функции
             
             
@@ -640,6 +740,13 @@ def handle_callback_query(call):
                 text=final_text,
                 reply_markup=back_markup
             )
+            
+            # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
+            # Если игра была сыграна (Красавчик, Лох, Размер),
+            # запоминаем этот чат как последний активный
+            if is_game_played:
+                user_last_active_chat[user_id] = chat_id
+            # --- Конец v20 ---
 
     except telebot.apihelper.ApiTelegramException as e:
         if "message is not modified" in str(e):
