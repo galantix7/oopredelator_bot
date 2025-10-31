@@ -1,7 +1,4 @@
 import telebot
-# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20.1 - ДЕБАГ) ---
-print(f"---!!! ПРОВЕРКА ВЕРСИИ: {telebot.__version__} !!!---")
-# --- Конец v20.1 ---
 import random
 import datetime
 import time 
