@@ -351,7 +351,7 @@ def create_poll_handler(message):
 
 # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v20) ---
 # --- НОВЫЙ ОБРАБОТЧИК INLINE РЕЖИМА ---
-@bot.inline_query_handler(func=lambda query: True)
+@bot.inline_handler(func=lambda query: True)
 def handle_inline_query(query):
     user_id = query.from_user.id
     user_name = query.from_user.first_name.replace('<', '&lt;').replace('>', '&gt;')
