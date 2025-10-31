@@ -40,6 +40,12 @@ except Exception as e:
 user_daily_stats = {} # Для "Градусника" и "Рулетки"
 polls_data = {}       # Для ОПРОСОВ
 
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
+# --- Новое хранилище для "умной" статистики ---
+# { chat_id: message_id }
+last_stats_message = {}
+# --- Конец v19 ---
+
 # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v18) ---
 # --- Новые хранилища для "личных" меню ---
 # { message_id: user_id }
@@ -50,7 +56,7 @@ user_menus = {}
 
 
 # --- Тексты для удобства ---
-MAIN_MENU_TEXT = "Докажи, что не терпила!:"
+MAIN_MENU_TEXT = "Докажи, что не терпила!"
 
 # --- ИДЕЯ №2: Функции "Градусника" ---
 
@@ -108,7 +114,7 @@ def create_main_menu_markup():
         callback_data="ask_size"
     )
     btn3 = types.InlineKeyboardButton(
-        "📊 Статистика дня", 
+        "📊 Статистика", 
         callback_data="show_group_stats"
     )
     btn4 = types.InlineKeyboardButton(
@@ -119,15 +125,23 @@ def create_main_menu_markup():
     markup.add(btn1, btn2, btn5, btn3, btn4)
     return markup
 
-# --- Обработчик /start (ИЗМЕНЕН v18) ---
+# --- Обработчик /start (ИЗМЕНЕН v19) ---
 @bot.message_handler(commands=['start', 'play'])
 def send_choice_menu(message):
     
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v18) ---
+    # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
     chat_id = message.chat.id
     user_id = message.from_user.id
     
-    # 1. Антифлуд: Проверяем, есть ли у юзера старое меню
+    # 1. Антифлуд: Удаляем команду /start
+    try:
+        bot.delete_message(chat_id, message.message_id)
+        print(f"Удалена команда {message.message_id} от {user_id}")
+    except telebot.apihelper.ApiTelegramException as e:
+        print(f"Не смог удалить команду /start (нет прав?): {e}")
+    # --- Конец v19 ---
+
+    # 2. Антифлуд: Проверяем, есть ли у юзера старое меню
     if user_id in user_menus:
         old_menu_id = user_menus[user_id]
         # Пытаемся удалить старое меню
@@ -142,47 +156,63 @@ def send_choice_menu(message):
             del menu_owners[old_menu_id]
         del user_menus[user_id]
 
-    # 2. Отправляем новое меню
+    # 3. Отправляем новое меню
     new_menu_msg = bot.send_message(
         chat_id, 
         MAIN_MENU_TEXT, 
         reply_markup=create_main_menu_markup()
     )
     
-    # 3. Привязываем меню к пользователю
+    # 4. Привязываем меню к пользователю
     new_menu_id = new_menu_msg.message_id
     menu_owners[new_menu_id] = user_id
     user_menus[user_id] = new_menu_id
     
     print(f"Создано новое меню {new_menu_id} для {user_id}")
-    # --- Конец v18 ---
 
 
-# --- Обработчик команды /groupstats (v16) ---
+# --- Обработчик команды /groupstats (ИЗМЕНЕН v19) ---
 @bot.message_handler(commands=['groupstats'])
 def send_group_stats(message):
     chat_id = message.chat.id
     today_str = str(datetime.date.today())
 
     try:
-        # Проверяем, это личная переписка или группа
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
+        # 1. Антифлуд: Удаляем команду /groupstats
+        try:
+            bot.delete_message(chat_id, message.message_id)
+            print(f"Удалена команда /groupstats {message.message_id}")
+        except telebot.apihelper.ApiTelegramException as e:
+            print(f"Не смог удалить команду /groupstats (нет прав?): {e}")
+        
+        # 2. Антифлуд: Удаляем СТАРЫЙ отчет бота
+        if chat_id in last_stats_message:
+            try:
+                bot.delete_message(chat_id, last_stats_message[chat_id])
+                print(f"Удален старый отчет {last_stats_message[chat_id]}")
+            except telebot.apihelper.ApiTelegramException as e:
+                print(f"Не смог удалить старый отчет (уже удален?): {e}")
+        # --- Конец v19 ---
+
+        # 3. Проверяем, это личная переписка или группа
         if message.chat.type == "private":
             bot.send_message(chat_id, "Эта команда предназначена для групповых чатов. Просто нажми /start, чтобы узнать *свои* проценты.")
             return
             
-        # Проверяем, есть ли данные за сегодня по этому чату
+        # 4. Проверяем, есть ли данные за сегодня по этому чату
         if chat_id not in user_daily_stats or user_daily_stats[chat_id]['date'] != today_str:
             bot.send_message(chat_id, f"Статистика за {today_str} в этом чате еще не собрана. \nНажмите /start и сыграйте!")
             return
             
-        # Словарь со статистикой этого чата
+        # 5. Словарь со статистикой этого чата
         stats_for_this_chat_dict = user_daily_stats[chat_id]['users']
         
         if not stats_for_this_chat_dict:
             bot.send_message(chat_id, "Пока никто не играл сегодня в этом чате. \nНажмите /start, чтобы быть первым!")
             return
             
-        # 1. Формируем основной список
+        # 6. Формируем основной список
         report_lines = [f"📊 Статистика ИГР в этом чате за {today_str}:\n"]
         
         # Сортируем по "красавчику"
@@ -206,15 +236,15 @@ def send_group_stats(message):
 
             report_lines.append(f" - <b>{user_name_safe}</b>: Красавчик {data['krasavchik']}%, Лох {data['loh']}%{size_stat_str}{roulette_stat_str}")
             
-        # 2. Находим "Королей"
+        # 7. Находим "Королей"
         king_data = max(stats_for_this_chat_dict.values(), key=lambda user_data: user_data['krasavchik'])
         loser_data = max(stats_for_this_chat_dict.values(), key=lambda user_data: user_data['loh'])
         
-        # 3. Готовим имена для HTML
+        # 8. Готовим имена для HTML
         king_name_safe = king_data['name'].replace('<', '&lt;').replace('>', '&gt;')
         loser_name_safe = loser_data['name'].replace('<', '&lt;').replace('>', '&gt;')
         
-        # 4. Добавляем номинации в отчет
+        # 9. Добавляем номинации в отчет
         report_lines.append(f"\n👑 <b>Царь Красавчиков сегодня:</b> {king_name_safe} ({king_data['krasavchik']}%)")
         report_lines.append(f"🤦‍♂️ <b>Главный Лох дня:</b> {loser_name_safe} ({loser_data['loh']}%)")
 
@@ -230,7 +260,11 @@ def send_group_stats(message):
             biggest_name_safe = biggest_data['name'].replace('<', '&lt;').replace('>', '&gt;')
             report_lines.append(f"🍆 <b>Главный Гигант:</b> {biggest_name_safe} ({biggest_data['size']} см)")
             
-        bot.send_message(chat_id, "\n".join(report_lines), parse_mode="HTML")
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
+        # 10. Отправляем НОВЫЙ отчет и СОХРАНЯЕМ его ID
+        stats_msg = bot.send_message(chat_id, "\n".join(report_lines), parse_mode="HTML")
+        last_stats_message[chat_id] = stats_msg.message_id
+        # --- Конец v19 ---
 
     except Exception as e:
         # Добавляем отлов ошибок, чтобы бот не падал
@@ -283,6 +317,10 @@ def create_poll_handler(message):
     chat_id = message.chat.id
     creator_id = message.from_user.id
     
+    # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v19) ---
+    # Мы НЕ удаляем команду /go, так как в ней содержится вопрос!
+    # --- Конец v19 ---
+    
     # Получаем текст вопроса (всё, что после /go )
     question = message.text[len('/go '):].strip()
     
@@ -334,8 +372,7 @@ def handle_callback_query(call):
     user_name = call.from_user.first_name 
 
     try:
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v17) ---
-        # --- ОБРАБОТКА ОПРОСА (ПОЛНОСТЬЮ ПЕРЕПИСАНА) ---
+        # --- ОБРАБОТКА ОПРОСА (v17) ---
         # Опросы - ПУБЛИЧНЫЕ, их может нажимать любой.
         if call.data.startswith('poll_'):
             
@@ -388,8 +425,7 @@ def handle_callback_query(call):
         # --- Конец блока ОПРОСОВ (v17) ---
 
         
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v18) ---
-        # --- ПРОВЕРКА "ВЛАДЕЛЬЦА" МЕНЮ ---
+        # --- ПРОВЕРКА "ВЛАДЕЛЬЦА" МЕНЮ (v18) ---
         # Если это не опрос, значит, это игровое меню. Проверим, кто его нажал.
         
         owner_id = menu_owners.get(message_id)
