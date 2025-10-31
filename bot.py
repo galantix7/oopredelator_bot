@@ -38,12 +38,14 @@ except Exception as e:
 
 # --- Наши "хранилища" данных в памяти ---
 user_daily_stats = {} # Для "Градусника" и "Рулетки"
-polls_data = {}       # --- ИДЕЯ №15: Новое хранилище для ОПРОСОВ ---
-                      # Структура: { message_id: {'question': '...', 'creator_id': ..., 'going': set(), 'not_going': set()} }
+
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v17) ---
+polls_data = {}       # Структура: { message_id: {'question': '...', 'creator_id': ..., 'going': {user_id: 'name'}, 'not_going': {user_id: 'name'}} }
+# --- Конец v17 ---
 
 
 # --- Тексты для удобства ---
-MAIN_MENU_TEXT = "Привет! Выбери, что хочешь узнать (сегодняшние замеры уже готовы):"
+MAIN_MENU_TEXT = "Докажи, кто тут лошара:"
 
 # --- ИДЕЯ №2: Функции "Градусника" ---
 
@@ -88,16 +90,16 @@ def get_size_comment(cm):
 def create_main_menu_markup():
     markup = types.InlineKeyboardMarkup(row_width=2) 
     btn1 = types.InlineKeyboardButton(
-        "Узнать, какой я сегодня красавчик 😎", 
+        "Красавчик 😎", 
         callback_data="ask_krasavchik"
     )
     btn2 = types.InlineKeyboardButton(
-        "Узнать, какой я сегодня лох 😅", 
+        "Лох 😅", 
         callback_data="ask_loh"
     )
     # Новая кнопка "Измерителя"
     btn5 = types.InlineKeyboardButton(
-        "Узнать мой размер 🍆", 
+        "Мой размер 🍆", 
         callback_data="ask_size"
     )
     btn3 = types.InlineKeyboardButton(
@@ -117,7 +119,7 @@ def create_main_menu_markup():
 def send_choice_menu(message):
     bot.send_message(
         message.chat.id, 
-        "Привет! Сейчас сгенерирую твои проценты на сегодня...", 
+        "Ну че чепушили, поиграем?", 
     )
     # Сразу покажем главное меню
     bot.send_message(
@@ -206,18 +208,44 @@ def send_group_stats(message):
         print(f"!!! ОШИБКА в send_group_stats: {e}")
         bot.send_message(message.chat.id, "Ой, что-то пошло не так при подсчете статистики...")
 
-# --- ИДЕЯ №15: НОВЫЙ ОБРАБОТЧИК ОПРОСОВ /go ---
+
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ (v17) ---
+# --- ОБРАБОТЧИК ОПРОСОВ /go (ПОЛНОСТЬЮ ПЕРЕПИСАН) ---
+
+def format_poll_text(poll_data):
+    """
+    Вспомогательная функция для генерации ТЕКСТА опроса
+    со списками имен.
+    """
+    question = poll_data['question']
+    
+    # Собираем списки имен
+    names_going = [name.replace('<', '&lt;').replace('>', '&gt;') for name in poll_data['going'].values()]
+    names_not_going = [name.replace('<', '&lt;').replace('>', '&gt;') for name in poll_data['not_going'].values()]
+    
+    text_going = " - (пока нет)"
+    if names_going:
+        text_going = "\n".join([f" - <b>{name}</b>" for name in names_going])
+        
+    text_not_going = " - (пока нет)"
+    if names_not_going:
+        text_not_going = "\n".join([f" - {name}" for name in names_not_going]) # Менее важно, не выделяем
+        
+    final_text = f"📣 <b>ОПРОС:</b> {question.replace('<', '&lt;').replace('>', '&gt;')}\n" \
+                 f"--------------------\n" \
+                 f"👍 <b>Идут ({len(names_going)}):</b>\n{text_going}\n\n" \
+                 f"👎 <b>Пас ({len(names_not_going)}):</b>\n{text_not_going}"
+                 
+    return final_text
+
 def create_poll_markup(poll_data):
     """
-    Вспомогательная функция для генерации кнопок опроса с 
-    актуальными счетчиками.
+    Вспомогательная функция для генерации КНОПОК опроса
+    (теперь она не меняет счетчики, они в тексте)
     """
-    count_going = len(poll_data['going'])
-    count_not_going = len(poll_data['not_going'])
-    
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_go = types.InlineKeyboardButton(f"Я иду! 👍 [{count_going}]", callback_data="poll_go")
-    btn_pass = types.InlineKeyboardButton(f"Я пас 👎 [{count_not_going}]", callback_data="poll_pass")
+    btn_go = types.InlineKeyboardButton(f"Я иду! 👍", callback_data="poll_go")
+    btn_pass = types.InlineKeyboardButton(f"Я пас 👎", callback_data="poll_pass")
     btn_close = types.InlineKeyboardButton("🔒 Закрыть опрос", callback_data="poll_close")
     markup.add(btn_go, btn_pass, btn_close)
     return markup
@@ -240,15 +268,16 @@ def create_poll_handler(message):
         poll_data = {
             'question': question,
             'creator_id': creator_id,
-            'going': set(),
-            'not_going': set()
+            'going': {}, # Теперь это словарь {user_id: 'name'}
+            'not_going': {} # Теперь это словарь {user_id: 'name'}
         }
         
-        # 2. Генерируем кнопки с [0] и [0]
+        # 2. Генерируем текст и кнопки
+        poll_text = format_poll_text(poll_data)
         markup = create_poll_markup(poll_data)
         
         # 3. Отправляем сообщение с опросом
-        poll_message = bot.send_message(chat_id, f"📣 **ОПРОС:** {question}", parse_mode="Markdown", reply_markup=markup)
+        poll_message = bot.send_message(chat_id, poll_text, parse_mode="HTML", reply_markup=markup)
         
         # 4. Сохраняем опрос в наше хранилище, используя ID сообщения как ключ
         polls_data[poll_message.message_id] = poll_data
@@ -257,7 +286,10 @@ def create_poll_handler(message):
         print(f"!!! ОШИБКА в create_poll_handler: {e}")
         bot.send_message(chat_id, "Ой, не смог создать опрос...")
 
-# --- ОСНОВНОЙ ОБРАБОТчик КНОПОК (v16) ---
+# --- Конец v17 ---
+
+
+# --- ОСНОВНОЙ ОБРАБОТчик КНОПОК (ИЗМЕНЕН v17) ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback_query(call):
     """
@@ -274,7 +306,8 @@ def handle_callback_query(call):
     user_name = call.from_user.first_name 
 
     try:
-        # --- ИДЕЯ №15: Обработка кнопок ОПРОСА "Кто идет?" ---
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ (v17) ---
+        # --- ОБРАБОТКА ОПРОСА (ПОЛНОСТЬЮ ПЕРЕПИСАНА) ---
         if call.data.startswith('poll_'):
             
             # 1. Находим данные опроса (по ID сообщения)
@@ -286,13 +319,13 @@ def handle_callback_query(call):
 
             # 2. Обрабатываем нажатие
             if call.data == "poll_go":
-                poll_data['going'].add(user_id)
-                poll_data['not_going'].discard(user_id) # Убираем, если передумал
+                poll_data['going'][user_id] = user_name
+                poll_data['not_going'].pop(user_id, None) # Убираем, если передумал
                 bot.answer_callback_query(call.id, "Вы записались! 👍")
                 
             elif call.data == "poll_pass":
-                poll_data['not_going'].add(user_id)
-                poll_data['going'].discard(user_id) # Убираем, если передумал
+                poll_data['not_going'][user_id] = user_name
+                poll_data['going'].pop(user_id, None) # Убираем, если передумал
                 bot.answer_callback_query(call.id, "Вы 'пасуете' 👎")
                 
             elif call.data == "poll_close":
@@ -302,24 +335,28 @@ def handle_callback_query(call):
                     return
                 
                 # Закрываем опрос
-                count_going = len(poll_data['going'])
-                count_not_going = len(poll_data['not_going'])
-                
-                final_text = f"**ОПРОС ЗАВЕРШЕН:** {poll_data['question']}\n\n" \
-                             f"👍 **Идут:** {count_going}\n" \
-                             f"👎 **Пас:** {count_not_going}"
+                final_text = format_poll_text(poll_data) # Форматируем с именами
+                final_text = f"**ОПРОС ЗАВЕРШЕН:**\n{final_text}" # Добавляем заголовок
                              
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, parse_mode="Markdown", reply_markup=None)
+                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, parse_mode="HTML", reply_markup=None)
                 # Удаляем опрос из памяти
                 del polls_data[message_id]
                 return
 
-            # 3. Обновляем кнопки с новым счетчиком
+            # 3. Обновляем ТЕКСТ сообщения с новым списком имен
+            new_text = format_poll_text(poll_data)
             new_markup = create_poll_markup(poll_data)
-            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=new_markup)
+            
+            try:
+                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=new_text, parse_mode="HTML", reply_markup=new_markup)
+            except telebot.apihelper.ApiTelegramException as e:
+                if "message is not modified" in str(e):
+                    pass # Игнорируем, если пользователь 2 раза нажал одно и то же
+                else:
+                    raise e # Поднимаем другую ошибку
             return # Выходим, т.к. это был опрос
             
-        # --- Конец блока ОПРОСОВ ---
+        # --- Конец блока ОПРОСОВ (v17) ---
 
         # (Если это не кнопка опроса, продолжаем как обычно)
         bot.answer_callback_query(call.id)
@@ -341,213 +378,4 @@ def handle_callback_query(call):
                 'loh': random.randint(0, 100),
                 'name': user_name,
                 'size': random.randint(1, 30), # Добавляем генерацию размера
-                'roulette_best_streak': 0,    
-                'roulette_current_streak': 0  
-            }
-
-        # Теперь у нас 100% есть актуальные данные
-        current_stats = user_daily_stats[chat_id]['users'][user_id]
-        
-        # Убедимся, что у старых пользователей есть новые поля
-        if 'roulette_best_streak' not in current_stats:
-            current_stats['roulette_best_streak'] = 0
-        if 'roulette_current_streak' not in current_stats:
-            current_stats['roulette_current_streak'] = 0
-        if 'size' not in current_stats:
-             current_stats['size'] = random.randint(1, 30) # Добавляем для тех, кто играл до v16
-
-        
-        # Готовим клавиатуру "Назад" (для "смерти" или выхода)
-        back_markup = types.InlineKeyboardMarkup(row_width=1)
-        back_btn = types.InlineKeyboardButton("⬅️ Назад", callback_data="go_back_to_menu")
-        back_markup.add(back_btn)
-
-
-        # --- ОБРАБОТКА КНОПКИ "НАЗАД" (v14) ---
-        if call.data == "go_back_to_menu":
-            # Когда выходим из рулетки, надо сохранить счет
-            current_streak = current_stats.get('roulette_current_streak', 0)
-            if current_streak > current_stats.get('roulette_best_streak', 0):
-                current_stats['roulette_best_streak'] = current_streak
-            # Сбрасываем текущую игру
-            current_stats['roulette_current_streak'] = 0
-            
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=MAIN_MENU_TEXT,
-                reply_markup=create_main_menu_markup()
-            )
-            return
-
-        # --- ОБРАБОТКА КНОПKI СТАТИСТИКИ (v11) ---
-        if call.data == "show_group_stats":
-            # Вызываем функцию, которая ОТПРАВИТ новое сообщение
-            send_group_stats(call.message)
-            return
-
-        # --- ИДЕЯ №6: АНИМАЦИЯ РУЛЕТКИ (v16) ---
-        
-        final_text = ""
-        animation_prefix = ""
-        is_standard_roulette_animation = False 
-        is_size_animation = False # Новый флаг для анимации "Размера"
-
-        
-        if call.data == "ask_krasavchik":
-            percent = current_stats['krasavchik']
-            final_text = get_krasavchik_comment(percent)
-            animation_prefix = "😎 Красавчик"
-            is_standard_roulette_animation = True 
-            
-        elif call.data == "ask_loh":
-            percent = current_stats['loh']
-            final_text = get_loh_comment(percent)
-            animation_prefix = "😅 Лох"
-            is_standard_roulette_animation = True 
-        
-        elif call.data == "ask_size":
-            size = current_stats['size']
-            final_text = get_size_comment(size)
-            animation_prefix = "🍆 Мой размер"
-            is_size_animation = True # Включаем новую анимацию
-        
-        elif call.data == "roulette_play_next":
-            
-            # 1. Получаем текущую серию
-            current_streak = current_stats.get('roulette_current_streak', 0)
-            current_chance = current_streak + 1
-            max_chance = 6
-            
-            # (Анимация)
-            try:
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"🌀 Кручу барабан... (Шанс {current_chance}/{max_chance})")
-                time.sleep(0.6)
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="🔫 Приставляю к виску...")
-                time.sleep(0.6)
-            except telebot.apihelper.ApiTelegramException: pass # Игнорируем ошибки
-
-            # 2. Считаем результат
-            shot = random.randint(1, max_chance)
-            is_dead = (shot <= current_chance)
-            
-            if is_dead: 
-                final_text = f"💥 БАМ! ({current_chance}/{max_chance}). Твоя удача кончилась на {current_chance}-м выстреле!"
-                
-                # Сохраняем ЛУЧШУЮ серию (это была серия *до* этого выстрела)
-                if current_streak > current_stats['roulette_best_streak']:
-                    current_stats['roulette_best_streak'] = current_streak
-                # Сбрасываем ТЕКУЩУЮ серию
-                current_stats['roulette_current_streak'] = 0
-                
-                # Показываем результат и кнопку "Назад"
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, reply_markup=back_markup)
-                return # Выходим из функции
-
-            else: # ВЫЖИЛ
-                # Увеличиваем текущую серию
-                current_stats['roulette_current_streak'] += 1
-                new_streak = current_stats['roulette_current_streak']
-                
-                # Готовим кнопки "Продолжить" / "Стоп"
-                continue_markup = types.InlineKeyboardMarkup(row_width=1)
-                
-                # Проверяем, не был ли это 5-й (последний удачный) выстрел
-                if new_streak == max_chance - 1: # Т.е. серия стала 5 (5/6)
-                    final_text = f"💨 Щелк! ({current_chance}/{max_chance}). НЕВЕРОЯТНО! Ты выжил... \nНо в барабане 100% остался 1 патрон."
-                    # Кнопка на 6-й, 100% смертельный выстрел
-                    continue_btn = types.InlineKeyboardButton(f"Сделать выстрел (Шанс 6/6)", callback_data="roulette_play_next")
-                else:
-                    final_text = f"💨 Щелк! ({current_chance}/{max_chance}). Пронесло... Рискнешь еще?"
-                    continue_btn = types.InlineKeyboardButton(f"Играть дальше (Шанс {new_streak + 1}/{max_chance})", callback_data="roulette_play_next")
-                
-                # Кнопка "Забрать выигрыш"
-                stop_btn = types.InlineKeyboardButton(f"🚫 Хватит (сохранить серию: {new_streak})", callback_data="go_back_to_menu")
-                continue_markup.add(continue_btn, stop_btn)
-                
-                # Показываем результат и 2 кнопки
-                bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final_text, reply_markup=continue_markup)
-                return # Выходим из функции
-            
-            
-        # Если была нажата одна из кнопок "Градусника" или "Размера"
-        if final_text:
-            
-            # Анимация для "Градусников"
-            if is_standard_roulette_animation:
-                # Запускаем анимацию (6 "прокруток")
-                for i in range(6): 
-                    try:
-                        fake_percent = random.randint(0, 100)
-                        emoji = "🎰" if i < 5 else "🎲" 
-                        
-                        bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            text=f"{emoji} {animation_prefix}: Кручу... {fake_percent}%"
-                        )
-                        time.sleep(0.4) # Пауза 0.4 секунды
-                    
-                    except telebot.apihelper.ApiTelegramException as e:
-                        if "message is not modified" in str(e): pass 
-                        else: print(f"Ошибка в цикле анимации: {e}")
-            
-            # Новая анимация для "Размера"
-            elif is_size_animation:
-                 # Запускаем анимацию (6 "прокруток")
-                for i in range(6): 
-                    try:
-                        fake_size = random.randint(1, 30)
-                        emoji = "🎰" if i < 5 else "📏" 
-                        
-                        bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            text=f"{emoji} {animation_prefix}: Измеряю... {fake_size} см"
-                        )
-                        time.sleep(0.4) # Пауза 0.4 секунды
-                    
-                    except telebot.apihelper.ApiTelegramException as e:
-                        if "message is not modified" in str(e): pass 
-                        else: print(f"Ошибка в цикле анимации: {e}")
-                    
-            # Показываем финальный результат
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=final_text,
-                reply_markup=back_markup
-            )
-
-    except telebot.apihelper.ApiTelegramException as e:
-        if "message is not modified" in str(e):
-            pass 
-        else:
-            print(f"Произошла ошибка (возможно, сообщение удалено): {e}")
-
-# --- НОВОЕ ДЛЯ RENDER (v17) ---
-# Этот код запустит Flask-сервер в отдельном потоке
-# чтобы "обмануть" Render и не дать ему "уснуть"
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    # Ответ "Пингеру"
-    return "Я жив, бот работает!"
-
-def run():
-    # Render сам выдаст порт в переменной $PORT
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-def start_server():
-    # Запускаем веб-сервер в отдельном потоке
-    t = Thread(target=run)
-    t.start()
-# --- Конец v17 ---
-
-# Запускаем бота
-print("Starting the web server to keep bot alive...")
-start_server()
-print("Starting the bot polling...")
-bot.polling(none_stop=True)
+                'roulette_best_streak':
