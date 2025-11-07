@@ -9,22 +9,19 @@ import os
 from flask import Flask
 from threading import Thread
 
-# --- Настройки ---
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- Данные (изменить на БД/Redis при масштабировании) ---
-user_daily_stats = {}  # {'chat_id': {'date': today_str, 'users': {...}}}
+user_daily_stats = {}
 polls_data = {}
-menu_owners = {}       # {menu_msg_id: user_id}
-user_menus = {}        # {user_id: menu_msg_id}
-last_stats_message = {} # {chat_id: msg_id}
+menu_owners = {}
+user_menus = {}
+last_stats_message = {}
 user_last_active_chat = {}
 
 MAIN_MENU_TEXT = "Докажи, что не терпила!:"
 
-# --- Утилиты ---
 def escape_html(text):
     return str(text).replace('<', '&lt;').replace('>', '&gt;')
 
@@ -64,17 +61,15 @@ def update_user_daily_stats(chat_id, user_id, user_name):
 
 def create_main_menu_markup():
     markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = [
-        ("Красавчик 😎", "ask_krasavchik"),
-        ("Лох 😅", "ask_loh"),
-        ("Мой размер 🍆", "ask_size"),
-        ("📊 Статистика", "show_group_stats"),
-        ("🇺🇦 Русская рулетка", "roulette_play_next"),
-    ]
-    markup.add(*(types.InlineKeyboardButton(text, data) for text, data in buttons))
+    markup.add(
+        types.InlineKeyboardButton("Красавчик 😎", callback_data="ask_krasavchik"),
+        types.InlineKeyboardButton("Лох 😅", callback_data="ask_loh"),
+        types.InlineKeyboardButton("Мой размер 🍆", callback_data="ask_size"),
+        types.InlineKeyboardButton("📊 Статистика", callback_data="show_group_stats"),
+        types.InlineKeyboardButton("🇺🇦 Русская рулетка", callback_data="roulette_play_next"),
+    )
     return markup
 
-# --- Команды меню ---
 try:
     bot.set_my_commands([
         types.BotCommand("start", "▶️ Старт / Игры (Личное меню)"),
@@ -85,7 +80,6 @@ try:
 except Exception as e:
     logging.error(f"Ошибка установки меню команд: {e}")
 
-# --- Обработчики ---
 @bot.message_handler(commands=['start', 'play'])
 def send_choice_menu(message):
     chat_id, user_id = message.chat.id, message.from_user.id
@@ -341,7 +335,6 @@ def handle_callback_query(call):
         else:
             logging.error(f"Ошибка в callback: {e}")
 
-# --- Flask сервер для "просыпания" на Render ---
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Я жив, бот работает!"
@@ -351,7 +344,6 @@ def run():
 def start_server():
     Thread(target=run).start()
 
-# --- Запуск ---
 logging.info("Starting web server ...")
 start_server()
 logging.info("Starting Telegram bot ...")
